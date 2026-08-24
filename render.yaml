@@ -1,0 +1,15 @@
+# Render 免费部署配置
+# 在 render.com 选择 "New" → "Blueprint" → 关联本仓库即可
+services:
+  - type: web
+    name: qq-music-playlist-tool
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: "3000"
