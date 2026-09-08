@@ -112,14 +112,26 @@ def extract_disstid(playlist_url):
 
 
 # ---------------- QQ 音乐接口 ----------------
+def safe_json(r, what="接口"):
+    """解析 QQ 音乐响应：兼容 JSONP 包裹，失败时抛可读错误（而不是裸 JSONDecodeError）"""
+    t = (r.text or "").strip()
+    if not t:
+        raise ValueError("QQ 音乐%s接口返回空内容（HTTP %s），可能是接口已变更或需要重新获取 cookie" % (what, r.status_code))
+    try:
+        body = t[t.index('(') + 1:t.rindex(')')] if t.startswith('(') else t
+        return json.loads(body)
+    except Exception:
+        raise ValueError("QQ 音乐%s接口返回了非 JSON 内容（HTTP %s），可能是接口已变更或需要重新获取 cookie。响应开头：%s"
+                         % (what, r.status_code, repr(t[:60])))
+
+
 def get_playlist_info(disstid):
     """公开接口读歌单详情：拿 dirid + 歌单名 + 现有歌曲 songmid 集合（去重用）"""
     url = (f"https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?"
            f"type=1&utf8=1&disstid={disstid}&format=json&inCharset=utf-8&outCharset=utf-8"
            f"&notice=0&platform=yqq.json&needNewCode=0&song_begin=0&song_num=5000")
     r = requests.get(url, headers={"User-Agent": UA, "Referer": "https://y.qq.com/"}, timeout=30)
-    t = r.text.strip()
-    d = json.loads(t[t.index('(') + 1:t.rindex(')')] if t.startswith('(') else t)
+    d = safe_json(r, "歌单详情")
     cd = (d.get("cdlist") or [{}])[0]
     if not cd or not cd.get("dirid"):
         raise ValueError("无法读取该歌单信息，请检查歌单链接是否正确")
@@ -137,8 +149,7 @@ def export_playlist(disstid):
            f"type=1&utf8=1&disstid={disstid}&format=json&inCharset=utf-8&outCharset=utf-8"
            f"&notice=0&platform=yqq.json&needNewCode=0&song_begin=0&song_num=5000")
     r = requests.get(url, headers={"User-Agent": UA, "Referer": "https://y.qq.com/"}, timeout=30)
-    t = r.text.strip()
-    d = json.loads(t[t.index('(') + 1:t.rindex(')')] if t.startswith('(') else t)
+    d = safe_json(r, "歌单详情")
     cd = (d.get("cdlist") or [{}])[0]
     if not cd or not cd.get("dissname"):
         raise ValueError("无法读取该歌单，请确认链接正确（私密歌单请先「分享」拿到带数字的链接）")
@@ -156,16 +167,30 @@ def export_playlist(disstid):
     return name, lines
 
 def search_song(ck, kw):
-    url = ("https://c.y.qq.com/soso/fcgi-bin/client_search_cp?"
-           f"w={requests.utils.quote(kw)}&format=json&n=5&p=1&cr=1&t=0&new_format=1"
-           "&platform=yqq.json&needNewCode=0&g_tk=0")
-    r = requests.get(url, headers={"User-Agent": UA, "Referer": "https://y.qq.com/"}, cookies=ck, timeout=15)
-    t = r.text.strip()
-    d = json.loads(t[t.index('(') + 1:t.rindex(')')] if t.startswith('(') else t)
-    for s in d.get("data", {}).get("song", {}).get("list", []):
-        if s.get("songmid") and s.get("songid"):
-            return {"songmid": s["songmid"], "songid": s["songid"],
-                    "name": s.get("songname"), "singer": "/".join(x.get("name", "") for x in s.get("singer", []))}
+    """搜索单曲。
+    注意：旧的 c.y.qq.com/soso/fcgi-bin/client_search_cp 已失效（返回 HTTP 500 空响应），
+    现改用新版统一接口 u.y.qq.com/cgi-bin/musicu.fcg。
+    """
+    payload = {"comm": {"ct": "11", "cv": "4747474", "v": "4747474", "uid": "0",
+                        "format": "json", "inCharset": "utf-8", "outCharset": "utf-8",
+                        "platform": "yqq.json"},
+               "req_1": {"method": "DoSearchForQQMusicDesktop",
+                         "module": "music.search.SearchCgiService",
+                         "param": {"query": kw, "page_num": 1, "num_per_page": 5}}}
+    r = requests.post("https://u.y.qq.com/cgi-bin/musicu.fcg",
+                      headers={"User-Agent": UA, "Referer": "https://y.qq.com/",
+                               "Content-Type": "application/json"},
+                      cookies=ck,
+                      data=json.dumps(payload, ensure_ascii=False).encode(), timeout=20)
+    d = safe_json(r, "搜索")
+    lst = (d.get("req_1", {}).get("data", {}).get("body", {})
+            .get("song", {}).get("list", []))
+    for s in lst:
+        mid, sid = s.get("mid"), s.get("id")
+        if mid and sid:
+            return {"songmid": mid, "songid": sid,
+                    "name": s.get("name") or s.get("title"),
+                    "singer": "/".join(x.get("name", "") for x in s.get("singer", []) if x.get("name"))}
     return None
 
 def add_songs(ck, uin, dirid, songids):
@@ -182,7 +207,7 @@ def add_songs(ck, uin, dirid, songids):
     r = requests.post(url, data=body.encode(),
                       headers={"User-Agent": UA, "Content-Type": "application/json", "Referer": "https://y.qq.com/"},
                       cookies=ck, timeout=30)
-    return r.json()
+    return safe_json(r, "添加歌曲")
 
 
 # ---------------- 任务管理 ----------------
