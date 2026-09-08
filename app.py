@@ -34,18 +34,51 @@ def zzc(p):
 
 
 # ---------------- 解析输入 ----------------
+def netscape_to_cookie(text):
+    """把 Netscape HTTP Cookie File（Get cookies.txt LOCALLY 等扩展导出）
+    转成单行 'k=v; k=v' 字符串。不是该格式则返回 None。
+
+    格式：域\t子域\t路径\t安全\t过期\t名\t值
+    """
+    data = [l for l in text.splitlines() if l.strip() and not l.strip().startswith('#')]
+    if len(data) < 2:
+        return None
+    hit, pairs = 0, []
+    for line in data:
+        f = line.split('\t') if '\t' in line else line.split()
+        if len(f) != 7:
+            continue
+        _dom, inc, path, sec, exp, name, val = f
+        inc, sec = inc.strip().upper(), sec.strip().upper()
+        path, exp, name, val = path.strip(), exp.strip(), name.strip(), val.strip()
+        if inc in ('TRUE', 'FALSE') and sec in ('TRUE', 'FALSE') \
+           and path.startswith('/') and exp.lstrip('-').isdigit() and name:
+            hit += 1
+            if val:
+                pairs.append("%s=%s" % (name, val))
+    if hit >= 2 and pairs:
+        return "; ".join(pairs)
+    return None
+
+
 def normalize_cookie_input(text):
-    """支持粘贴纯 cookie 字符串，或整段 cURL 命令（自动提取其中的 cookie）"""
+    """支持粘贴纯 cookie 字符串、整段 cURL 命令，或 Netscape 格式 cookies.txt"""
     t = (text or "").strip()
     if not t:
         return t
+    # 先试 Netscape cookies.txt（多行 Tab 分隔，浏览器扩展导出常见）
+    ns = netscape_to_cookie(t)
+    if ns:
+        return ns
     if t.lower().startswith('curl') or '--url' in t or '-b ' in t or '-b"' in t or '-b^' in t:
         m = re.search(r'(?:-b|--cookie)\s+\^?"([^"]*?)\^?"', t, re.DOTALL)
         if m and '=' in m.group(1):
             return m.group(1).strip()
-        m = re.search(r'(?:-H|--header)\s+\^?"?cookie:\s*([^"\n]+?)\^?"?', t, re.I | re.DOTALL)
-        if m and '=' in m.group(1):
-            return m.group(1).strip()
+        m = re.search(r'(?:-H|--header)\s+\^?"?cookie:\s*([^"\n]+)', t, re.I)
+        if m:
+            v = m.group(1).strip().rstrip('^').strip()
+            if '=' in v:
+                return v
     return t
 
 def parse_cookie(cookie_str):
@@ -618,8 +651,10 @@ input.field::placeholder, textarea.field::placeholder { color: var(--text-tertia
 <script>
 function switchTab(t){document.getElementById('tab-import').style.display=t==='import'?'block':'none';document.getElementById('tab-export').style.display=t==='export'?'block':'none';document.getElementById('tab-import-btn').classList.toggle('active',t==='import');document.getElementById('tab-export-btn').classList.toggle('active',t==='export')}
 function toggleGuide(){document.getElementById('guideToggle').classList.toggle('open');document.getElementById('guideBody').classList.toggle('open')}
-function extractCookieLocal(input){let t=(input||'').trim();if(/^curl\b/i.test(t)||t.indexOf('--url')>=0||/-b\s/.test(t)){let m=t.match(/(?:-b|--cookie)\s+\^?"([^"]*?)\^?"/);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim();m=t.match(/(?:-b|--cookie)\s+\^?'([^']*?)\^?'/);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim();m=t.match(/(?:-H|--header)\s+\^?"?cookie:\s*([^"\n]+?)\^?"?/i);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim();m=t.match(/(?:-H|--header)\s+\^?'?cookie:\s*([^'\n]+?)\^?'?/i);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim();m=t.match(/uin=\d+[^\n"']*?qm_keyst=[^"'\s;]+/);if(m)return m[0].trim()}return t}
-function checkCookieInput(){const raw=document.getElementById('cookie').value;const badge=document.getElementById('cookieBadge');if(!raw.trim()){badge.style.display='none';return}const ex=extractCookieLocal(raw);if(raw.trim().toLowerCase().startsWith('curl')||raw.includes('--url')||/-b\s/.test(raw)){badge.style.display='inline-flex';badge.textContent='cURL 已识别';badge.classList.add('detected')}else if(ex.includes('uin=')&&(ex.includes('qm_keyst')||ex.includes('qqmusic_key'))){badge.style.display='inline-flex';badge.textContent='Cookie 有效';badge.classList.add('detected')}else{badge.style.display='inline-flex';badge.textContent='待识别';badge.classList.remove('detected')}}
+function netscapeToCookie(t){var lines=t.split(/\r?\n/),data=[],i;for(i=0;i<lines.length;i++){var s=lines[i].trim();if(s&&s.charAt(0)!=='#')data.push(s)}if(data.length<2)return null;var hit=0,pairs=[];for(i=0;i<data.length;i++){var f=data[i].indexOf('\t')>=0?data[i].split('\t'):data[i].split(/\s+/);if(f.length!==7)continue;var inc=(f[1]||'').trim().toUpperCase(),sec=(f[3]||'').trim().toUpperCase(),path=(f[2]||'').trim(),exp=(f[4]||'').trim(),name=(f[5]||'').trim(),val=(f[6]||'').trim();if((inc==='TRUE'||inc==='FALSE')&&(sec==='TRUE'||sec==='FALSE')&&path.charAt(0)==='/'&&/^-?\d+$/.test(exp)&&name){hit++;if(val)pairs.push(name+'='+val)}}return(hit>=2&&pairs.length)?pairs.join('; '):null}
+function isNetscape(t){return !!netscapeToCookie(t)}
+function extractCookieLocal(input){let t=(input||'').trim();let ns=netscapeToCookie(t);if(ns)return ns;if(/^curl\b/i.test(t)||t.indexOf('--url')>=0||/-b\s/.test(t)){let m=t.match(/(?:-b|--cookie)\s+\^?"([^"]*?)\^?"/);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim();m=t.match(/(?:-b|--cookie)\s+\^?'([^']*?)\^?'/);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim();m=t.match(/(?:-H|--header)\s+\^?"?cookie:\s*([^"\n]+)/i);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim().replace(/\^+$/,'').trim();m=t.match(/(?:-H|--header)\s+\^?'?cookie:\s*([^'\n]+)/i);if(m&&m[1]&&m[1].indexOf('=')>=0)return m[1].trim().replace(/\^+$/,'').trim();m=t.match(/uin=\d+[^\n"']*?qm_keyst=[^"'\s;]+/);if(m)return m[0].trim()}return t}
+function checkCookieInput(){const raw=document.getElementById('cookie').value;const badge=document.getElementById('cookieBadge');if(!raw.trim()){badge.style.display='none';return}const ex=extractCookieLocal(raw);if(isNetscape(raw)){badge.style.display='inline-flex';badge.textContent='cookies.txt 已识别';badge.classList.add('detected')}else if(raw.trim().toLowerCase().startsWith('curl')||raw.includes('--url')||/-b\s/.test(raw)){badge.style.display='inline-flex';badge.textContent='cURL 已识别';badge.classList.add('detected')}else if(ex.includes('uin=')&&(ex.includes('qm_keyst')||ex.includes('qqmusic_key'))){badge.style.display='inline-flex';badge.textContent='Cookie 有效';badge.classList.add('detected')}else{badge.style.display='inline-flex';badge.textContent='待识别';badge.classList.remove('detected')}}
 function updateSongCount(){const t=document.getElementById('songs').value.trim();const b=document.getElementById('songCount');if(!t){b.style.display='none';return}b.style.display='inline-flex';b.textContent=t.split('\n').filter(l=>l.trim()).length+' 首'}
 function toast(m,t='info'){const c=document.getElementById('toastContainer');const e=document.createElement('div');e.className='toast '+t;const ic={success:'<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>',error:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',info:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'};e.innerHTML=ic[t]+'<span>'+m+'</span>';c.appendChild(e);setTimeout(()=>{e.style.opacity='0';e.style.transform='translateX(100%)';e.style.transition='all 0.3s';setTimeout(()=>e.remove(),300)},3000)}
 function setStage(idx){for(let i=0;i<4;i++){const s=document.getElementById('stage-'+i);s.classList.remove('active','done');const d=s.querySelector('.progress-stage-dot');if(i<idx){s.classList.add('done');d.innerHTML='<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>'}else if(i===idx){s.classList.add('active');d.textContent=i+1}else{d.textContent=i+1}}}
