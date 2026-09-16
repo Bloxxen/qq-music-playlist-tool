@@ -325,6 +325,37 @@ def run_import(tid, data):
         set_task(tid, status="error", message=str(e))
 
 
+# ---------------- CORS（供 B 站 Toy 等外部静态页跨域调用本后端） ----------------
+# 需要额外放行的来源用逗号分隔写进环境变量 ALLOWED_ORIGINS；
+# 设 ALLOW_ORIGIN_ALL=1 则放行所有来源。
+_cors_default = "https://www.bilibili.com,https://bilibili.com,http://localhost:8000,http://127.0.0.1:8000"
+ALLOWED_ORIGINS = set(filter(None, (os.environ.get("ALLOWED_ORIGINS") or _cors_default).split(",")))
+ALLOW_ORIGIN_ALL = os.environ.get("ALLOW_ORIGIN_ALL", "").lower() in ("1", "true", "yes")
+
+
+def _origin_ok(origin):
+    return (not origin) or ALLOW_ORIGIN_ALL or origin == "null" or origin in ALLOWED_ORIGINS
+
+
+@app.after_request
+def add_cors_headers(resp):
+    origin = request.headers.get("Origin")
+    if _origin_ok(origin):
+        resp.headers["Access-Control-Allow-Origin"] = origin or "*"
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Max-Age"] = "86400"
+    return resp
+
+
+@app.route("/api/import", methods=["OPTIONS"])
+@app.route("/api/export", methods=["OPTIONS"])
+@app.route("/api/status/<tid>", methods=["OPTIONS"])
+def cors_preflight(tid=None):
+    return ("", 204)
+
+
 # ---------------- 路由 ----------------
 @app.route("/")
 def index():
