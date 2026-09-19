@@ -328,7 +328,7 @@ def run_import(tid, data):
 # ---------------- CORS（供 B 站 Toy 等外部静态页跨域调用本后端） ----------------
 # 需要额外放行的来源用逗号分隔写进环境变量 ALLOWED_ORIGINS；
 # 设 ALLOW_ORIGIN_ALL=1 则放行所有来源。
-_cors_default = "https://www.bilibili.com,https://bilibili.com,http://localhost:8000,http://127.0.0.1:8000"
+_cors_default = "https://www.bilibili.com,https://bilibili.com,https://www.bilibilitoy.com,https://bilibilitoy.com,http://localhost:8000,http://127.0.0.1:8000"
 ALLOWED_ORIGINS = set(filter(None, (os.environ.get("ALLOWED_ORIGINS") or _cors_default).split(",")))
 ALLOW_ORIGIN_ALL = os.environ.get("ALLOW_ORIGIN_ALL", "").lower() in ("1", "true", "yes")
 
